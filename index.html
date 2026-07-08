@@ -197,7 +197,7 @@ function renderQuestion(){
   <div class="card">
     ${q.section ? `<div class="q-section-tag">${escapeHtml(q.section)}</div>` : ''}
     <p class="q-text">${escapeHtml(q.question)}</p>
-    ${q.image ? `<img class="q-image" src="images/${q.image}" alt="ภาพประกอบคำถาม">` : ''}
+    ${q.image ? `<img class="q-image" src="${q.image}" alt="ภาพประกอบคำถาม">` : ''}
     ${q.context ? `<div class="q-context">${escapeHtml(q.context)}</div>` : ''}
     <div class="options">${optsHtml}</div>
     <div class="nav-row">
