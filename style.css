@@ -242,6 +242,19 @@ table.data-table tr:hover td{background:var(--teal-100);}
 .search-row{display:flex; gap:10px; margin-bottom:16px;}
 .search-row input{flex:1;}
 
+.dept-chip-row{display:flex; flex-wrap:wrap; gap:10px;}
+.dept-chip{
+  padding:10px 16px; border-radius:999px; border:1.5px solid var(--line); background:#fff;
+  cursor:pointer; font-family:inherit; font-size:13.5px; font-weight:600; color:var(--navy-800);
+  display:flex; align-items:center; gap:8px;
+}
+.dept-chip .dept-chip-pct{font-size:12px; font-weight:700; color:var(--muted);}
+.dept-chip.active{background:var(--navy-900); border-color:var(--navy-900); color:#fff;}
+.dept-chip.active .dept-chip-pct{color:rgba(255,255,255,.75);}
+@media (hover: hover) and (pointer: fine){
+  .dept-chip:hover{border-color:var(--teal-500);}
+}
+
 .idp-box{
   margin-top:16px; padding:16px 18px; border-radius:12px;
   background:var(--warning-bg); border:1px solid #EFD9A8;
