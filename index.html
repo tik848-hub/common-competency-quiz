@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>ระบบทดสอบความรู้ Common Competency พยาบาล</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="pulse-mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12h4l2 7 4-14 3 10 2-5h5"/>
+    </svg>
+  </div>
+  <div class="titles">
+    <div class="system-name">ระบบทดสอบความรู้ Common Competency</div>
+    <div class="hospital-name" id="hospitalNameTop"></div>
+  </div>
+  <div class="spacer"></div>
+  <a class="nav-link" href="dashboard.html">Dashboard</a>
+</div>
+
+<div class="wrap" id="app"></div>
+
+<script src="config.js"></script>
+<script src="quiz-data.js"></script>
+<script>
+/* ============================ STATE ============================ */
+const TOPIC_ORDER = ['pain','wound','ic','med'];
+const TOPIC_ICON = {
+  pain: '💊', wound: '🩹', ic: '🧼', med: '💉'
+};
+
+let state = {
+  user: JSON.parse(sessionStorage.getItem('cc_user') || 'null'),
+  results: JSON.parse(sessionStorage.getItem('cc_results') || '{}'), // {topicKey: {score,total,pct,passed}}
+  currentTopic: null,
+  currentQuestions: [],
+  currentIndex: 0,
+  answers: {}, // qid -> letter
+  startTime: null
+};
+
+const app = document.getElementById('app');
+document.getElementById('hospitalNameTop').textContent = CONFIG.HOSPITAL_NAME;
+
+function saveUser(){ sessionStorage.setItem('cc_user', JSON.stringify(state.user)); }
+function saveResults(){ sessionStorage.setItem('cc_results', JSON.stringify(state.results)); }
+
+function shuffle(arr){
+  const a = arr.slice();
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]]=[a[j],a[i]];
+  }
+  return a;
+}
+
+/* ============================ ROUTER ============================ */
+function render(){
+  if(!state.user){
+    renderLogin();
+  } else if(!state.currentTopic){
+    renderTopicSelect();
+  } else if(state.currentQuestions.length && state.currentIndex < state.currentQuestions.length){
+    renderQuestion();
+  } else if(state.currentQuestions.length){
+    renderResult();
+  }
+}
+
+/* ============================ LOGIN ============================ */
+function renderLogin(){
+  app.innerHTML = `
+  <div class="card" style="max-width:440px;margin:30px auto 0;">
+    <div class="eyebrow">เริ่มต้นการทดสอบ</div>
+    <h2 style="margin:0 0 4px;">ระบุตัวตนผู้เข้าทดสอบ</h2>
+    <p class="muted small" style="margin-top:0;">กรอกข้อมูลเพื่อบันทึกผลคะแนนของท่านลงระบบ</p>
+    <div style="margin-top:18px;">
+      <label class="field-label">รหัสพนักงาน</label>
+      <input type="text" id="inEmpId" placeholder="เช่น 12345" inputmode="numeric">
+    </div>
+    <div style="margin-top:14px;">
+      <label class="field-label">ชื่อ-นามสกุล</label>
+      <input type="text" id="inName" placeholder="เช่น สมหญิง ใจดี">
+    </div>
+    <div style="margin-top:14px;">
+      <label class="field-label">แผนก / หน่วยงาน <span class="muted">(ไม่บังคับ)</span></label>
+      <input type="text" id="inDept" placeholder="เช่น NICU">
+    </div>
+    <button class="btn btn-primary btn-block" style="margin-top:20px;" onclick="submitLogin()">เข้าสู่ระบบทดสอบ</button>
+  </div>`;
+  document.getElementById('inEmpId').addEventListener('keydown', e=>{ if(e.key==='Enter') submitLogin(); });
+  document.getElementById('inName').addEventListener('keydown', e=>{ if(e.key==='Enter') submitLogin(); });
+}
+
+function submitLogin(){
+  const empId = document.getElementById('inEmpId').value.trim();
+  const name = document.getElementById('inName').value.trim();
+  const dept = document.getElementById('inDept').value.trim();
+  if(!empId || !name){
+    alert('กรุณากรอกรหัสพนักงานและชื่อ-นามสกุล');
+    return;
+  }
+  state.user = {empId, name, dept};
+  saveUser();
+  render();
+}
+
+/* ============================ TOPIC SELECT ============================ */
+function renderTopicSelect(){
+  const cards = TOPIC_ORDER.map(key=>{
+    const topic = QUIZ_DATA[key];
+    const res = state.results[key];
+    let badge = `<span class="badge badge-neutral">ยังไม่ทำ</span>`;
+    if(res){
+      badge = res.passed
+        ? `<span class="badge badge-pass">ผ่าน ${res.pct}%</span>`
+        : `<span class="badge badge-fail">ไม่ผ่าน ${res.pct}%</span>`;
+    }
+    return `
+    <button class="topic-card" onclick="startTopic('${key}')">
+      <div class="tc-top">
+        <div>
+          <div class="tc-name">${TOPIC_ICON[key]}  ${topic.label.split('(')[0].trim()}</div>
+          <div class="tc-count">${topic.questions.length} ข้อ &middot; เกณฑ์ผ่าน ${Math.round(CONFIG.PASS_THRESHOLD*100)}%</div>
+        </div>
+        ${badge}
+      </div>
+    </button>`;
+  }).join('');
+
+  const doneCount = Object.keys(state.results).length;
+
+  app.innerHTML = `
+  <div class="card">
+    <div class="eyebrow">ผู้เข้าทดสอบ</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <div>
+        <h2 style="margin:0;">${escapeHtml(state.user.name)}</h2>
+        <div class="muted small">รหัสพนักงาน ${escapeHtml(state.user.empId)}${state.user.dept ? ' &middot; '+escapeHtml(state.user.dept):''}</div>
+      </div>
+      <button class="btn btn-ghost" onclick="logout()">เปลี่ยนผู้ใช้</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">เลือกหัวข้อทดสอบ</div>
+    <h2 style="margin:0 0 4px;">แบบทดสอบ 4 หัวข้อ</h2>
+    <p class="muted small" style="margin-top:0;">ทำครบแล้ว ${doneCount}/4 หัวข้อ</p>
+    <div class="topic-grid">${cards}</div>
+  </div>
+  <div class="footer-note">ผลคะแนนจะถูกบันทึกลงระบบส่วนกลางโดยอัตโนมัติเมื่อส่งคำตอบ</div>
+  `;
+}
+
+function logout(){
+  state.user = null;
+  state.results = {};
+  sessionStorage.removeItem('cc_user');
+  sessionStorage.removeItem('cc_results');
+  render();
+}
+
+function startTopic(key){
+  state.currentTopic = key;
+  state.currentQuestions = shuffle(QUIZ_DATA[key].questions);
+  state.currentIndex = 0;
+  state.answers = {};
+  state.startTime = Date.now();
+  render();
+}
+
+/* ============================ QUESTION ============================ */
+function renderQuestion(){
+  const q = state.currentQuestions[state.currentIndex];
+  const total = state.currentQuestions.length;
+  const pct = Math.round((state.currentIndex)/total*100);
+  const selected = state.answers[q.id];
+
+  const optsHtml = q.options.map(o=>`
+    <div class="option ${selected===o.letter?'selected':''}" onclick="selectAnswer('${q.id}','${o.letter}')">
+      <div class="opt-letter">${o.letter}</div>
+      <div class="opt-text">${escapeHtml(o.text)}</div>
+    </div>
+  `).join('');
+
+  app.innerHTML = `
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <div class="eyebrow" style="margin:0;">${escapeHtml(QUIZ_DATA[state.currentTopic].label.split('(')[0].trim())}</div>
+      <div class="muted small">ข้อ ${state.currentIndex+1} / ${total}</div>
+    </div>
+    <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+  </div>
+  <div class="card">
+    ${q.section ? `<div class="q-section-tag">${escapeHtml(q.section)}</div>` : ''}
+    <p class="q-text">${escapeHtml(q.question)}</p>
+    ${q.image ? `<img class="q-image" src="images/${q.image}" alt="ภาพประกอบคำถาม">` : ''}
+    ${q.context ? `<div class="q-context">${escapeHtml(q.context)}</div>` : ''}
+    <div class="options">${optsHtml}</div>
+    <div class="nav-row">
+      <button class="btn btn-ghost" onclick="prevQuestion()" ${state.currentIndex===0?'disabled':''}>ย้อนกลับ</button>
+      <button class="btn btn-primary" id="nextBtn" onclick="nextQuestion()" ${!selected?'disabled':''}>
+        ${state.currentIndex===total-1 ? 'ส่งคำตอบ' : 'ข้อถัดไป'}
+      </button>
+    </div>
+  </div>`;
+}
+
+function selectAnswer(qid, letter){
+  state.answers[qid] = letter;
+  renderQuestion();
+}
+
+function prevQuestion(){
+  if(state.currentIndex>0){ state.currentIndex--; renderQuestion(); }
+}
+
+function nextQuestion(){
+  const total = state.currentQuestions.length;
+  if(state.currentIndex < total-1){
+    state.currentIndex++;
+    renderQuestion();
+  } else {
+    startSubmit();
+  }
+}
+
+/* ============================ SUBMIT / SAVE ============================ */
+function buildPayload(){
+  const qs = state.currentQuestions;
+  let score = 0;
+  qs.forEach(q=>{ if(state.answers[q.id]===q.correct) score++; });
+  const total = qs.length;
+  const pct = Math.round((score/total)*1000)/10;
+  const passed = (score/total) >= CONFIG.PASS_THRESHOLD;
+  const durationSec = Math.round((Date.now()-state.startTime)/1000);
+  return {
+    result: {score, total, pct, passed},
+    payload: {
+      employeeId: state.user.empId,
+      name: state.user.name,
+      department: state.user.dept || '',
+      topicKey: state.currentTopic,
+      topicLabel: QUIZ_DATA[state.currentTopic].label,
+      score, total, percentage: pct,
+      passed: passed ? 'PASS' : 'FAIL',
+      durationSec,
+      answersJson: JSON.stringify(state.answers)
+    }
+  };
+}
+
+function renderSubmitting(){
+  app.innerHTML = `
+  <div class="card" style="text-align:center; padding:50px 20px;">
+    <div class="spinner"></div>
+    <p class="muted" style="margin-top:16px;">กำลังบันทึกคะแนนลงระบบ...</p>
+  </div>`;
+}
+
+function startSubmit(){
+  const {result, payload} = buildPayload();
+  state.pendingResult = result;
+  state.pendingPayload = payload;
+  renderSubmitting();
+  saveToSheet(payload);
+}
+
+function saveToSheet(payload){
+  const body = Object.keys(payload).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(payload[k])).join('&');
+  fetch(CONFIG.GAS_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body
+  }).then(()=>{
+    finalizeSubmit(true);
+  }).catch(()=>{
+    finalizeSubmit(false);
+  });
+}
+
+function finalizeSubmit(saveOk){
+  state.results[state.currentTopic] = state.pendingResult;
+  saveResults();
+  state.saveStatus = saveOk ? 'success' : 'error';
+  state.currentIndex = state.currentQuestions.length; // triggers result view
+  render();
+}
+
+function retrySave(){
+  renderSubmitting();
+  saveToSheet(state.pendingPayload);
+}
+
+/* ============================ RESULT ============================ */
+
+function renderResult(){
+  const res = state.results[state.currentTopic];
+  const gaugeColor = res.passed ? 'var(--success)' : (res.pct>=60 ? 'var(--warning)' : 'var(--danger)');
+  const circumference = 2*Math.PI*72;
+  const offset = circumference - (res.pct/100)*circumference;
+
+  const saveBannerHtml = state.saveStatus === 'error'
+    ? `<div class="save-status save-status-error">
+         <span>⚠️ บันทึกลงระบบไม่สำเร็จ (อาจไม่มีอินเทอร์เน็ต) — คะแนนยังอยู่ในเครื่องนี้ กรุณาลองบันทึกอีกครั้ง</span>
+         <button class="btn btn-primary" style="margin-top:10px;" onclick="retrySave()">บันทึกอีกครั้ง</button>
+       </div>`
+    : `<div class="save-status save-status-ok">✓ บันทึกคะแนนลงระบบเรียบร้อยแล้ว</div>`;
+
+  app.innerHTML = `
+  <div class="card">
+    <div class="eyebrow">ผลการทดสอบ</div>
+    <h2 style="margin:0 0 12px;">${escapeHtml(QUIZ_DATA[state.currentTopic].label.split('(')[0].trim())}</h2>
+    <div class="gauge-wrap">
+      <div class="gauge">
+        <svg width="170" height="170" viewBox="0 0 170 170">
+          <circle cx="85" cy="85" r="72" fill="none" stroke="var(--line)" stroke-width="14"/>
+          <circle cx="85" cy="85" r="72" fill="none" stroke="${gaugeColor}" stroke-width="14"
+            stroke-linecap="round" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
+        </svg>
+        <div class="g-pct">
+          <div class="num">${res.pct}%</div>
+          <div class="lbl">${res.score}/${res.total} ข้อ</div>
+        </div>
+      </div>
+      <div class="result-banner ${res.passed?'pass':'fail'}">
+        ${res.passed
+          ? `✓ ผ่านเกณฑ์ (${Math.round(CONFIG.PASS_THRESHOLD*100)}%)`
+          : `✕ ไม่ผ่านเกณฑ์ (ต้องได้ ${Math.round(CONFIG.PASS_THRESHOLD*100)}% ขึ้นไป)`}
+      </div>
+      ${saveBannerHtml}
+    </div>
+    <div class="nav-row" style="margin-top:20px;">
+      <button class="btn btn-primary btn-block" onclick="backToTopics()">กลับหน้าเลือกหัวข้อ</button>
+    </div>
+  </div>
+  `;
+}
+
+function backToTopics(){
+  state.currentTopic = null;
+  state.currentQuestions = [];
+  state.currentIndex = 0;
+  state.answers = {};
+  render();
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Dashboard | ระบบทดสอบความรู้ Common Competency พยาบาล</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="pulse-mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12h4l2 7 4-14 3 10 2-5h5"/>
+    </svg>
+  </div>
+  <div class="titles">
+    <div class="system-name">Dashboard ผลการทดสอบ</div>
+    <div class="hospital-name" id="hospitalNameTop"></div>
+  </div>
+  <div class="spacer"></div>
+  <a class="nav-link" href="index.html">ไปหน้าทดสอบ</a>
+</div>
+
+<div class="wrap wide" id="app"></div>
+
+<script src="config.js"></script>
+<script src="quiz-data.js"></script>
+<script>
+document.getElementById('hospitalNameTop').textContent = CONFIG.HOSPITAL_NAME;
+
+const TOPIC_ORDER = ['pain','wound','ic','med'];
+const TOPIC_COLORS = { pain:'#0E8388', wound:'#16436F', ic:'#B87A15', med:'#C23A4E' };
+
+const IDP_RECOMMENDATIONS = {
+  pain: [
+    'ทบทวนแนวทางการประเมินและจัดการความปวด (Pain Assessment & Management Guideline) ของหน่วยงาน',
+    'ฝึกปฏิบัติการประเมินความปวดและการให้ยา opioid ร่วมกับ Preceptor/พยาบาลพี่เลี้ยง',
+    'เข้าร่วม Journal club หรือ CNEU หัวข้อ Pain management',
+    'นัดทำแบบทดสอบซ้ำภายใน 2 สัปดาห์'
+  ],
+  wound: [
+    'ทบทวน Wound Assessment & Dressing Protocol และ Pressure Injury Staging',
+    'ฝึกปฏิบัติ Case study การประเมิน/ทำแผลร่วมกับทีม Wound Care',
+    'เข้าร่วม Workshop หรือ Wound care round กับทีมสหสาขา',
+    'นัดทำแบบทดสอบซ้ำภายใน 2 สัปดาห์'
+  ],
+  ic: [
+    'ทบทวนแนวทาง Standard Precautions และ Transmission-based Precautions',
+    'ฝึกปฏิบัติ Hand Hygiene 5 Moments ร่วมกับพยาบาลควบคุมการติดเชื้อ (IC Nurse)',
+    'เข้าร่วม IC Audit Round เพื่อสังเกตการณ์แนวปฏิบัติจริง',
+    'นัดทำแบบทดสอบซ้ำภายใน 2 สัปดาห์'
+  ],
+  med: [
+    'ทบทวนนโยบายยาความเสี่ยงสูง (High-Alert Drug) และ Independent Double Check',
+    'ฝึกปฏิบัติการคำนวณและบริหารยาร่วมกับ Preceptor',
+    'เข้าร่วมอบรม Medication Error Prevention ของฝ่ายการพยาบาล',
+    'นัดทำแบบทดสอบซ้ำภายใน 2 สัปดาห์'
+  ]
+};
+
+let allRows = [];
+let activeTab = 'overview';
+const app = document.getElementById('app');
+
+function topicShortLabel(key){
+  return QUIZ_DATA[key].label.split('(')[0].trim();
+}
+
+function loadData(){
+  app.innerHTML = `<div class="card" style="text-align:center; padding:50px;"><div class="spinner"></div><p class="muted small" style="margin-top:14px;">กำลังโหลดข้อมูลผลการทดสอบ...</p></div>`;
+  const cbName = 'ccjsonp_' + Date.now();
+  window[cbName] = function(res){
+    if(res && res.status==='success'){
+      allRows = res.data || [];
+    } else {
+      allRows = [];
+    }
+    delete window[cbName];
+    document.body.removeChild(script);
+    render();
+  };
+  const script = document.createElement('script');
+  script.src = CONFIG.GAS_URL + (CONFIG.GAS_URL.includes('?') ? '&' : '?') + 'callback=' + cbName;
+  script.onerror = function(){
+    delete window[cbName];
+    allRows = [];
+    render(true);
+  };
+  document.body.appendChild(script);
+}
+
+function render(loadError){
+  if(loadError){
+    app.innerHTML = `
+    <div class="card empty-state">
+      <div style="font-size:32px;">⚠️</div>
+      <h3>ไม่สามารถโหลดข้อมูลได้</h3>
+      <p class="muted small">ตรวจสอบว่าได้ตั้งค่า CONFIG.GAS_URL ใน config.js และ Deploy Google Apps Script เป็น Web App แล้ว (Who has access: Anyone)</p>
+      <button class="btn btn-primary" onclick="loadData()" style="margin-top:10px;">ลองใหม่</button>
+    </div>`;
+    return;
+  }
+
+  const tabsHtml = `
+  <div class="tabs">
+    <button class="tab-btn ${activeTab==='overview'?'active':''}" onclick="setTab('overview')">ภาพรวมทั้งหมด</button>
+    <button class="tab-btn ${activeTab==='individual'?'active':''}" onclick="setTab('individual')">รายบุคคล</button>
+  </div>`;
+
+  app.innerHTML = tabsHtml + `<div id="tabContent"></div>`;
+  if(activeTab==='overview') renderOverview();
+  else renderIndividual();
+}
+
+function setTab(tab){
+  activeTab = tab;
+  render();
+}
+
+/* ============================ OVERVIEW ============================ */
+function renderOverview(){
+  const container = document.getElementById('tabContent');
+  if(allRows.length===0){
+    container.innerHTML = `<div class="card empty-state"><div style="font-size:32px;">📋</div><h3>ยังไม่มีข้อมูลผลการทดสอบ</h3><p class="muted small">เมื่อมีผู้ทำแบบทดสอบและส่งคำตอบ ข้อมูลจะปรากฏที่นี่โดยอัตโนมัติ</p></div>`;
+    return;
+  }
+
+  const totalAttempts = allRows.length;
+  const uniqueUsers = new Set(allRows.map(r=>r.EmployeeID)).size;
+  const passCount = allRows.filter(r=>r.Passed==='PASS').length;
+  const overallPassRate = Math.round((passCount/totalAttempts)*1000)/10;
+  const avgPct = Math.round(allRows.reduce((s,r)=>s+Number(r.Percentage||0),0)/totalAttempts*10)/10;
+
+  const kpiHtml = `
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">จำนวนครั้งที่ทดสอบ</div>
+      <div class="kpi-value">${totalAttempts}</div>
+      <div class="kpi-sub">ทุกหัวข้อรวมกัน</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">ผู้เข้าทดสอบ</div>
+      <div class="kpi-value">${uniqueUsers}</div>
+      <div class="kpi-sub">คน (นับตามรหัสพนักงาน)</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">อัตราผ่านเกณฑ์</div>
+      <div class="kpi-value" style="color:${overallPassRate>=80?'var(--success)':'var(--danger)'}">${overallPassRate}%</div>
+      <div class="kpi-sub">${passCount}/${totalAttempts} ครั้ง</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">คะแนนเฉลี่ยรวม</div>
+      <div class="kpi-value">${avgPct}%</div>
+      <div class="kpi-sub">เกณฑ์ผ่าน ${Math.round(CONFIG.PASS_THRESHOLD*100)}%</div>
+    </div>
+  </div>`;
+
+  const barRows = TOPIC_ORDER.map(key=>{
+    const rows = allRows.filter(r=>r.TopicKey===key);
+    if(rows.length===0){
+      return `<div class="bar-row">
+        <div class="bar-label">${topicShortLabel(key)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:0%; background:${TOPIC_COLORS[key]}"></div></div>
+        <div class="bar-val muted">ยังไม่มีข้อมูล</div>
+      </div>`;
+    }
+    const avg = Math.round(rows.reduce((s,r)=>s+Number(r.Percentage||0),0)/rows.length*10)/10;
+    const pass = rows.filter(r=>r.Passed==='PASS').length;
+    return `<div class="bar-row">
+      <div class="bar-label">${topicShortLabel(key)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${avg}%; background:${TOPIC_COLORS[key]}"></div></div>
+      <div class="bar-val">${avg}%</div>
+    </div>
+    <div class="small muted" style="margin:-6px 0 14px 160px;">${rows.length} ครั้ง &middot; ผ่าน ${pass}/${rows.length}</div>`;
+  }).join('');
+
+  const recentRows = allRows.slice().sort((a,b)=> new Date(b.Timestamp) - new Date(a.Timestamp)).slice(0,25);
+  const tableRows = recentRows.map(r=>`
+    <tr>
+      <td>${formatDate(r.Timestamp)}</td>
+      <td>${escapeHtml(r.EmployeeID)}</td>
+      <td>${escapeHtml(r.Name)}</td>
+      <td>${escapeHtml(r.Department||'-')}</td>
+      <td>${topicShortLabel(r.TopicKey)}</td>
+      <td>${r.Score}/${r.Total}</td>
+      <td>${r.Percentage}%</td>
+      <td><span class="badge ${r.Passed==='PASS'?'badge-pass':'badge-fail'}">${r.Passed==='PASS'?'ผ่าน':'ไม่ผ่าน'}</span></td>
+    </tr>`).join('');
+
+  /* ---------- analysis: per-topic averages (reused for insights) ---------- */
+  const topicStats = TOPIC_ORDER.map(key=>{
+    const rows = allRows.filter(r=>r.TopicKey===key);
+    if(rows.length===0) return {key, avg:null, passRate:null, n:0};
+    const avg = Math.round(rows.reduce((s,r)=>s+Number(r.Percentage||0),0)/rows.length*10)/10;
+    const passRate = Math.round(rows.filter(r=>r.Passed==='PASS').length/rows.length*1000)/10;
+    return {key, avg, passRate, n:rows.length};
+  });
+  const ranked = topicStats.filter(t=>t.avg!==null).sort((a,b)=>a.avg-b.avg);
+  const weakest = ranked[0];
+  const strongest = ranked[ranked.length-1];
+
+  /* ---------- analysis: completion funnel ---------- */
+  const byUserTopics = {};
+  allRows.forEach(r=>{
+    const k = r.EmployeeID;
+    if(!byUserTopics[k]) byUserTopics[k] = new Set();
+    byUserTopics[k].add(r.TopicKey);
+  });
+  const completionCounts = [0,0,0,0,0]; // index = number of distinct topics done
+  Object.values(byUserTopics).forEach(set=>{ completionCounts[set.size]++; });
+  const usersFullyDone = completionCounts[4];
+  const totalUsersSeen = uniqueUsers;
+  const completionRate = totalUsersSeen ? Math.round(usersFullyDone/totalUsersSeen*1000)/10 : 0;
+
+  /* ---------- analysis: department comparison ---------- */
+  const deptMap = {};
+  allRows.forEach(r=>{
+    const d = (r.Department||'').trim() || 'ไม่ระบุแผนก';
+    if(!deptMap[d]) deptMap[d] = [];
+    deptMap[d].push(r);
+  });
+  const deptStats = Object.keys(deptMap).map(d=>{
+    const rows = deptMap[d];
+    const avg = Math.round(rows.reduce((s,r)=>s+Number(r.Percentage||0),0)/rows.length*10)/10;
+    const passRate = Math.round(rows.filter(r=>r.Passed==='PASS').length/rows.length*1000)/10;
+    return {dept:d, avg, passRate, n:rows.length};
+  }).sort((a,b)=>b.avg-a.avg);
+  const weakestDept = deptStats.length>1 ? deptStats[deptStats.length-1] : null;
+
+  /* ---------- analysis: score distribution buckets per topic ---------- */
+  const bucketColors = {low:'var(--danger)', mid:'var(--warning)', high:'var(--success)'};
+  const distRows = TOPIC_ORDER.map(key=>{
+    const rows = allRows.filter(r=>r.TopicKey===key);
+    if(rows.length===0) return {key, n:0, low:0, mid:0, high:0};
+    const low = rows.filter(r=>Number(r.Percentage)<60).length;
+    const mid = rows.filter(r=>Number(r.Percentage)>=60 && Number(r.Percentage)<80).length;
+    const high = rows.filter(r=>Number(r.Percentage)>=80).length;
+    return {key, n:rows.length, low, mid, high};
+  });
+
+  /* ---------- insights text ---------- */
+  const insightItems = [];
+  if(weakest && strongest && weakest.key !== strongest.key){
+    insightItems.push(`หัวข้อที่คะแนนเฉลี่ย<strong>ต่ำสุด</strong>คือ <strong>${topicShortLabel(weakest.key)}</strong> (${weakest.avg}% &middot; ผ่านเกณฑ์ ${weakest.passRate}%) ควรพิจารณาจัดอบรมหรือทบทวนเนื้อหาเพิ่มเติม`);
+    insightItems.push(`หัวข้อที่คะแนนเฉลี่ย<strong>สูงสุด</strong>คือ <strong>${topicShortLabel(strongest.key)}</strong> (${strongest.avg}% &middot; ผ่านเกณฑ์ ${strongest.passRate}%)`);
+  }
+  insightItems.push(`มีผู้ทำแบบทดสอบครบทั้ง 4 หัวข้อแล้ว <strong>${usersFullyDone}/${totalUsersSeen} คน</strong> (${completionRate}%)`);
+  if(weakestDept){
+    insightItems.push(`แผนก/หน่วยงานที่มีคะแนนเฉลี่ย<strong>ต่ำสุด</strong>คือ <strong>${escapeHtml(weakestDept.dept)}</strong> (${weakestDept.avg}% &middot; ผ่านเกณฑ์ ${weakestDept.passRate}%)`);
+  }
+  const insightsHtml = `
+  <div class="card">
+    <div class="eyebrow">สรุปเชิงวิเคราะห์</div>
+    <h2 style="margin:0 0 14px;">ข้อสังเกตจากข้อมูลปัจจุบัน</h2>
+    <ul class="insight-list">
+      ${insightItems.map(t=>`<li>${t}</li>`).join('')}
+    </ul>
+  </div>`;
+
+  const deptHtml = deptStats.length > 1 ? `
+  <div class="card">
+    <div class="eyebrow">เปรียบเทียบตามแผนก</div>
+    <h2 style="margin:0 0 16px;">คะแนนเฉลี่ยและอัตราผ่านเกณฑ์รายแผนก</h2>
+    ${deptStats.map(d=>`
+      <div class="bar-row">
+        <div class="bar-label">${escapeHtml(d.dept)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${d.avg}%; background:${d.avg>=80?'var(--success)':(d.avg>=60?'var(--warning)':'var(--danger)')}"></div></div>
+        <div class="bar-val">${d.avg}%</div>
+      </div>
+      <div class="small muted" style="margin:-6px 0 14px 160px;">${d.n} ครั้ง &middot; ผ่านเกณฑ์ ${d.passRate}%</div>
+    `).join('')}
+  </div>` : '';
+
+  const distHtml = `
+  <div class="card">
+    <div class="eyebrow">การกระจายคะแนน</div>
+    <h2 style="margin:0 0 6px;">สัดส่วนผลคะแนนแต่ละหัวข้อ</h2>
+    <p class="muted small" style="margin-top:0;">แบ่งตามช่วงคะแนน: <span style="color:var(--danger);font-weight:600;">ต่ำกว่า 60%</span> &middot; <span style="color:var(--warning);font-weight:600;">60-79%</span> &middot; <span style="color:var(--success);font-weight:600;">80% ขึ้นไป</span></p>
+    ${distRows.map(d=>{
+      if(d.n===0) return `<div class="dist-row"><div class="dist-label">${topicShortLabel(d.key)}</div><div class="muted small">ยังไม่มีข้อมูล</div></div>`;
+      const lowPct = d.low/d.n*100, midPct = d.mid/d.n*100, highPct = d.high/d.n*100;
+      return `
+      <div class="dist-row">
+        <div class="dist-label">${topicShortLabel(d.key)} <span class="muted small">(${d.n} ครั้ง)</span></div>
+        <div class="dist-track">
+          ${d.low>0?`<div class="dist-seg" style="width:${lowPct}%; background:${bucketColors.low}" title="ต่ำกว่า 60%: ${d.low}"></div>`:''}
+          ${d.mid>0?`<div class="dist-seg" style="width:${midPct}%; background:${bucketColors.mid}" title="60-79%: ${d.mid}"></div>`:''}
+          ${d.high>0?`<div class="dist-seg" style="width:${highPct}%; background:${bucketColors.high}" title="80%+: ${d.high}"></div>`:''}
+        </div>
+        <div class="dist-legend small muted">${d.low} ต่ำกว่า 60% &middot; ${d.mid} ช่วง 60-79% &middot; ${d.high} ผ่าน 80%+</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  const funnelHtml = `
+  <div class="card">
+    <div class="eyebrow">ความคืบหน้า</div>
+    <h2 style="margin:0 0 16px;">จำนวนหัวข้อที่ทำแล้วต่อคน</h2>
+    ${[4,3,2,1,0].map(n=>{
+      const count = completionCounts[n]||0;
+      const pct = totalUsersSeen ? Math.round(count/totalUsersSeen*100) : 0;
+      const label = n===4 ? 'ครบ 4 หัวข้อ' : (n===0 ? 'ยังไม่เริ่ม' : `ทำแล้ว ${n} หัวข้อ`);
+      return `
+      <div class="bar-row">
+        <div class="bar-label">${label}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${n===4?'var(--success)':'var(--teal-500)'}"></div></div>
+        <div class="bar-val">${count} คน</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  container.innerHTML = `
+  ${kpiHtml}
+  ${insightsHtml}
+  <div class="card">
+    <div class="eyebrow">คะแนนเฉลี่ยรายหัวข้อ</div>
+    <h2 style="margin:0 0 16px;">ภาพรวมแยกตามหัวข้อ</h2>
+    ${barRows}
+  </div>
+  ${distHtml}
+  ${funnelHtml}
+  ${deptHtml}
+  <div class="card">
+    <div class="eyebrow">ประวัติล่าสุด</div>
+    <h2 style="margin:0 0 16px;">รายการทดสอบล่าสุด 25 ครั้ง</h2>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>วันที่/เวลา</th><th>รหัสพนักงาน</th><th>ชื่อ</th><th>แผนก</th><th>หัวข้อ</th><th>คะแนน</th><th>%</th><th>ผลลัพธ์</th></tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+
+    </div>
+  </div>`;
+}
+
+/* ============================ INDIVIDUAL ============================ */
+function renderIndividual(){
+  const container = document.getElementById('tabContent');
+  container.innerHTML = `
+  <div class="card">
+    <div class="eyebrow">ค้นหา</div>
+    <h2 style="margin:0 0 12px;">ค้นหาผลรายบุคคล</h2>
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="พิมพ์รหัสพนักงาน หรือ ชื่อ-นามสกุล">
+      <button class="btn btn-primary" onclick="doSearch()">ค้นหา</button>
+    </div>
+  </div>
+  <div id="searchResult"></div>`;
+
+  document.getElementById('searchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
+}
+
+function doSearch(){
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const resultEl = document.getElementById('searchResult');
+  if(!q){
+    resultEl.innerHTML = '';
+    return;
+  }
+  const rows = allRows.filter(r =>
+    String(r.EmployeeID).toLowerCase().includes(q) ||
+    String(r.Name).toLowerCase().includes(q)
+  );
+  if(rows.length===0){
+    resultEl.innerHTML = `<div class="card empty-state"><div style="font-size:28px;">🔍</div><p>ไม่พบข้อมูลที่ตรงกับ "${escapeHtml(q)}"</p></div>`;
+    return;
+  }
+
+  // group by employee, take latest attempt per topic
+  const byUser = {};
+  rows.forEach(r=>{
+    const key = r.EmployeeID + '||' + r.Name;
+    if(!byUser[key]) byUser[key] = {empId:r.EmployeeID, name:r.Name, dept:r.Department, attempts:[]};
+    byUser[key].attempts.push(r);
+  });
+
+  const cardsHtml = Object.values(byUser).map(u=>{
+    const latestByTopic = {};
+    u.attempts.forEach(a=>{
+      const prev = latestByTopic[a.TopicKey];
+      if(!prev || new Date(a.Timestamp) > new Date(prev.Timestamp)) latestByTopic[a.TopicKey] = a;
+    });
+
+    const topicBars = TOPIC_ORDER.map(key=>{
+      const a = latestByTopic[key];
+      if(!a){
+        return `<div class="bar-row">
+          <div class="bar-label">${topicShortLabel(key)}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:0%;background:${TOPIC_COLORS[key]}"></div></div>
+          <div class="bar-val muted small">ยังไม่ทำ</div>
+        </div>`;
+      }
+      return `<div class="bar-row">
+        <div class="bar-label">${topicShortLabel(key)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${a.Percentage}%;background:${TOPIC_COLORS[key]}"></div></div>
+        <div class="bar-val" style="color:${a.Passed==='PASS'?'var(--success)':'var(--danger)'}">${a.Percentage}%</div>
+      </div>`;
+    }).join('');
+
+    const doneTopics = Object.keys(latestByTopic).length;
+    const allPass = doneTopics===4 && Object.values(latestByTopic).every(a=>a.Passed==='PASS');
+
+    const failedTopics = TOPIC_ORDER.filter(key => latestByTopic[key] && latestByTopic[key].Passed !== 'PASS');
+    const idpHtml = failedTopics.length ? `
+      <div class="idp-box">
+        <div class="idp-title">📋 แผนพัฒนารายบุคคล (IDP) แนะนำ — เฉพาะหัวข้อที่ไม่ผ่านเกณฑ์</div>
+        ${failedTopics.map(key => `
+          <div class="idp-topic">
+            <div class="idp-topic-name">${topicShortLabel(key)} <span class="muted small">(${latestByTopic[key].Percentage}%)</span></div>
+            <ul class="idp-list">
+              ${IDP_RECOMMENDATIONS[key].map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+            </ul>
+          </div>
+        `).join('')}
+      </div>` : '';
+
+    const historyRows = u.attempts.slice().sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).map(a=>`
+      <tr>
+        <td>${formatDate(a.Timestamp)}</td>
+        <td>${topicShortLabel(a.TopicKey)}</td>
+        <td>${a.Score}/${a.Total}</td>
+        <td>${a.Percentage}%</td>
+        <td><span class="badge ${a.Passed==='PASS'?'badge-pass':'badge-fail'}">${a.Passed==='PASS'?'ผ่าน':'ไม่ผ่าน'}</span></td>
+      </tr>`).join('');
+
+    return `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+        <div>
+          <h2 style="margin:0;">${escapeHtml(u.name)}</h2>
+          <div class="muted small">รหัสพนักงาน ${escapeHtml(u.empId)}${u.dept ? ' &middot; '+escapeHtml(u.dept):''}</div>
+        </div>
+        <span class="badge ${doneTopics<4?'badge-neutral':(allPass?'badge-pass':'badge-fail')}">
+          ${doneTopics<4 ? `ทำแล้ว ${doneTopics}/4 หัวข้อ` : (allPass ? 'ผ่านครบทุกหัวข้อ' : 'ยังไม่ผ่านครบทุกหัวข้อ')}
+        </span>
+      </div>
+      <div style="margin-top:18px;">${topicBars}</div>
+      ${idpHtml}
+      <details style="margin-top:14px;">
+        <summary style="cursor:pointer; font-weight:600; color:var(--teal-600); font-size:14px;">ดูประวัติการทดสอบทั้งหมด (${u.attempts.length} ครั้ง)</summary>
+        <div class="table-scroll" style="margin-top:10px;">
+          <table class="data-table">
+            <thead><tr><th>วันที่/เวลา</th><th>หัวข้อ</th><th>คะแนน</th><th>%</th><th>ผลลัพธ์</th></tr></thead>
+            <tbody>${historyRows}</tbody>
+          </table>
+        </div>
+      </details>
+    </div>`;
+  }).join('');
+
+  resultEl.innerHTML = cardsHtml;
+}
+
+/* ============================ UTIL ============================ */
+function formatDate(ts){
+  const d = new Date(ts);
+  if(isNaN(d)) return ts;
+  return d.toLocaleString('th-TH', {year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+loadData();
+</script>
+</body>
+</html>
