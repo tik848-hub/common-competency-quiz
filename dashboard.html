@@ -247,7 +247,7 @@ function renderOverview(){
   /* ---------- analysis: department comparison ---------- */
   const deptMap = {};
   allRows.forEach(r=>{
-    const d = (r.Department||'').trim() || 'ไม่ระบุแผนก';
+    const d = String(r.Department||'').trim() || 'ไม่ระบุแผนก';
     if(!deptMap[d]) deptMap[d] = [];
     deptMap[d].push(r);
   });
@@ -375,7 +375,7 @@ function renderDepartment(){
 
   const deptMap = {};
   allRows.forEach(r=>{
-    const d = (r.Department||'').trim() || 'ไม่ระบุแผนก';
+    const d = String(r.Department||'').trim() || 'ไม่ระบุแผนก';
     if(!deptMap[d]) deptMap[d] = [];
     deptMap[d].push(r);
   });
